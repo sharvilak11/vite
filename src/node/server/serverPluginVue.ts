@@ -571,6 +571,5 @@ function rewriteDefaultExport(code: string): string {
       s.overwrite(node.start!, node.declaration.start!, `const __script = `)
     }
   })
-  const ret = s.toString()
-  return ret
+  return s.toString()
 }
