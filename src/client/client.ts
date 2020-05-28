@@ -63,15 +63,9 @@ function warnFailedFetch(err: Error, path: string | string[]) {
 
 // Listen for messages
 socket.addEventListener('message', async ({ data }) => {
-  const {
-    type,
-    path,
-    changeSrcPath,
-    id,
-    index,
-    timestamp,
-    customData
-  } = JSON.parse(data)
+  const { type, path, changeSrcPath, id, timestamp, customData } = JSON.parse(
+    data
+  )
 
   if (changeSrcPath) {
     await bustSwCache(changeSrcPath)
@@ -100,19 +94,10 @@ socket.addEventListener('message', async ({ data }) => {
         console.log(`[vite] ${path} template updated.`)
       })
       break
-    case 'vue-style-update':
-      const stylePath = `${path}?type=style&index=${index}`
-      await bustSwCache(stylePath)
-      const content = await import(stylePath + `&t=${timestamp}`)
-      updateStyle(id, content.default)
-      console.log(
-        `[vite] ${path} style${index > 0 ? `#${index}` : ``} updated.`
-      )
-      break
     case 'style-update':
-      await bustSwCache(`${path}?import`)
-      const style = await import(`${path}?t=${timestamp}`)
-      updateStyle(id, style.default)
+      const importQuery = path.includes('?') ? '&import' : '?import'
+      await bustSwCache(`${path}${importQuery}`)
+      await import(`${path}${importQuery}&t=${timestamp}`)
       console.log(`[vite] ${path} updated.`)
       break
     case 'style-remove':
@@ -178,7 +163,7 @@ async function updateModule(
   changedPath: string,
   timestamp: string
 ) {
-  const mod = jsHotModuleMap.get(id)
+  const mod = hotModulesMap.get(id)
   if (!mod) {
     console.error(
       `[vite] got js update notification but no client callback was registered. Something is wrong.`
@@ -211,17 +196,19 @@ async function updateModule(
       ? deps.some((dep) => modulesToUpdate.has(dep))
       : modulesToUpdate.has(deps)
   })
-  // reset callbacks on self update since they are going to be registered again
-  if (isSelfUpdate) {
-    mod.callbacks = []
-  }
 
   await Promise.all(
     Array.from(modulesToUpdate).map(async (dep) => {
-      const disposer = jsDisposeMap.get(dep)
-      if (disposer) await disposer()
-      const newMod = await import(dep + `?t=${timestamp}`)
-      moduleMap.set(dep, newMod)
+      const disposer = disposeMap.get(dep)
+      if (disposer) await disposer(dataMap.get(dep))
+      try {
+        const newMod = await import(
+          dep + (dep.includes('?') ? '&' : '?') + `t=${timestamp}`
+        )
+        moduleMap.set(dep, newMod)
+      } catch (e) {
+        warnFailedFetch(e, dep)
+      }
     })
   )
 
@@ -246,33 +233,67 @@ interface HotCallback {
   fn: (modules: object | object[]) => void
 }
 
-const jsHotModuleMap = new Map<string, HotModule>()
-const jsDisposeMap = new Map<string, () => void | Promise<void>>()
+const hotModulesMap = new Map<string, HotModule>()
+const disposeMap = new Map<string, (data: any) => void | Promise<void>>()
+const dataMap = new Map<string, any>()
 const customUpdateMap = new Map<string, ((customData: any) => void)[]>()
 
-export const hot = {
-  accept(
-    id: string,
-    deps: HotCallback['deps'],
-    callback: HotCallback['fn'] = () => {}
-  ) {
-    const mod: HotModule = jsHotModuleMap.get(id) || {
-      id,
-      callbacks: []
-    }
-    mod.callbacks.push({ deps, fn: callback })
-    jsHotModuleMap.set(id, mod)
-  },
-
-  dispose(id: string, cb: () => void) {
-    jsDisposeMap.set(id, cb)
-  },
-
-  on(event: string, cb: () => void) {
-    const existing = customUpdateMap.get(event) || []
-    existing.push(cb)
-    customUpdateMap.set(event, existing)
+export const createHotContext = (id: string) => {
+  if (!dataMap.has(id)) {
+    dataMap.set(id, {})
   }
+
+  // when a file is hot updated, a new context is created
+  // clear its stale callbacks
+  const mod = hotModulesMap.get(id)
+  if (mod) {
+    mod.callbacks = []
+  }
+
+  const hot = {
+    get data() {
+      return dataMap.get(id)
+    },
+
+    accept(callback: HotCallback['fn'] = () => {}) {
+      hot.acceptDeps(id, callback)
+    },
+
+    acceptDeps(
+      deps: HotCallback['deps'],
+      callback: HotCallback['fn'] = () => {}
+    ) {
+      const mod: HotModule = hotModulesMap.get(id) || {
+        id,
+        callbacks: []
+      }
+      mod.callbacks.push({
+        deps: deps as HotCallback['deps'],
+        fn: callback
+      })
+      hotModulesMap.set(id, mod)
+    },
+
+    dispose(cb: (data: any) => void) {
+      disposeMap.set(id, cb)
+    },
+
+    // noop, used for static analysis only
+    decline() {},
+
+    invalidate() {
+      location.reload()
+    },
+
+    // custom events
+    on(event: string, cb: () => void) {
+      const existing = customUpdateMap.get(event) || []
+      existing.push(cb)
+      customUpdateMap.set(event, existing)
+    }
+  }
+
+  return hot
 }
 
 function bustSwCache(path: string) {

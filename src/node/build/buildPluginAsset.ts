@@ -1,7 +1,7 @@
 import path from 'path'
 import fs from 'fs-extra'
 import { Plugin, OutputBundle } from 'rollup'
-import { isStaticAsset } from '../utils'
+import { cleanUrl, isStaticAsset } from '../utils'
 import hash_sum from 'hash-sum'
 import slash from 'slash'
 import mime from 'mime-types'
@@ -9,12 +9,13 @@ import mime from 'mime-types'
 const debug = require('debug')('vite:build:asset')
 
 interface AssetCacheEntry {
-  content: Buffer | null
-  fileName: string | null
+  content?: Buffer
+  fileName?: string
   url: string
 }
 
 const assetResolveCache = new Map<string, AssetCacheEntry>()
+const publicDirRE = /^public(\/|\\)/
 
 export const resolveAsset = async (
   id: string,
@@ -23,21 +24,32 @@ export const resolveAsset = async (
   assetsDir: string,
   inlineLimit: number
 ): Promise<AssetCacheEntry> => {
+  id = cleanUrl(id)
   const cached = assetResolveCache.get(id)
   if (cached) {
     return cached
   }
 
   let resolved: AssetCacheEntry | undefined
+  const relativePath = path.relative(root, id)
 
-  const pathFromRoot = path.relative(root, id)
-  if (/^public(\/|\\)/.test(pathFromRoot)) {
-    // assets inside the public directory will be copied over verbatim
-    // so all we need to do is just append the baseDir
-    resolved = {
-      content: null,
-      fileName: null,
-      url: slash(path.join(publicBase, pathFromRoot))
+  if (!fs.existsSync(id)) {
+    // try resolving from public dir
+    const publicDirPath = path.join(root, 'public', relativePath)
+    if (fs.existsSync(publicDirPath)) {
+      // file is resolved from public dir, it will be copied verbatim so no
+      // need to read content here.
+      resolved = {
+        url: slash(path.join(publicBase, relativePath))
+      }
+    }
+  }
+
+  if (!resolved) {
+    if (publicDirRE.test(relativePath)) {
+      resolved = {
+        url: slash(path.join(publicBase, relativePath.replace(publicDirRE, '')))
+      }
     }
   }
 

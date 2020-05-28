@@ -2,9 +2,11 @@ import { Context } from 'koa'
 import path from 'path'
 import slash from 'slash'
 import qs from 'querystring'
+import resolve from 'resolve'
+import { supportedExts } from '../resolver'
 
 export const resolveFrom = (root: string, id: string) =>
-  require.resolve(id, { paths: [root] })
+  resolve.sync(id, { basedir: root, extensions: supportedExts })
 
 export const queryRE = /\?.*$/
 export const hashRE = /\#.*$/
@@ -41,10 +43,10 @@ export const parseWithQuery = (
   }
 }
 
-const httpRE = /^https?:\/\//
-export const isExternalUrl = (url: string) => httpRE.test(url)
+const externalRE = /^(https?:)?\/\//
+export const isExternalUrl = (url: string) => externalRE.test(url)
 
-const imageRE = /\.(png|jpe?g|gif|svg|ico)(\?.*)?$/
+const imageRE = /\.(png|jpe?g|gif|svg|ico|webp)(\?.*)?$/
 const mediaRE = /\.(mp4|webm|ogg|mp3|wav|flac|aac)(\?.*)?$/
 const fontsRE = /\.(woff2?|eot|ttf|otf)(\?.*)?$/i
 

@@ -12,7 +12,7 @@
   </p>
   <p>
     Absolute asset reference in template:
-    <img src="/public/icon.png" style="width: 30px;" />
+    <img src="/icon.png" style="width: 30px;" />
   </p>
   <div class="css-bg">
     <span style="background: #fff;">CSS background</span>
@@ -44,7 +44,7 @@ export default {
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url('../fonts/Inter-Italic.woff2') format('woff2'),
+  src: url('../fonts/Inter-Italic.woff2?#iefix') format('woff2'),
     url('/fonts/Inter-Italic.woff') format('woff');
 }
 
@@ -52,7 +52,7 @@ body {
   font-family: 'Inter';
 }
 .css-bg {
-  background: url(/public/icon.png);
+  background: url(/icon.png);
   background-size: 10px;
 }
 .css-bg-data-uri {

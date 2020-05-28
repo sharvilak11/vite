@@ -2432,6 +2432,11 @@ dot-prop@^5.2.0:
   dependencies:
     is-obj "^2.0.0"
 
+dotenv@^8.2.0:
+  version "8.2.0"
+  resolved "https://registry.yarnpkg.com/dotenv/-/dotenv-8.2.0.tgz#97e619259ada750eea3e4ea3e26bceea5424b16a"
+  integrity sha512-8sJ78ElpbDJBHNeBzUbUVLsqKdccaa/BXF1uPTw3GrvQTBgrQrtObr2mUrE38vzYd8cEv+m/JBfDLioYcfXoaw==
+
 duplexer@0.1.1:
   version "0.1.1"
   resolved "https://registry.yarnpkg.com/duplexer/-/duplexer-0.1.1.tgz#ace6ff808c1ce66b57d1ebf97977acb02334cfc1"
@@ -2537,10 +2542,10 @@ es-to-primitive@^1.2.1:
     is-date-object "^1.0.1"
     is-symbol "^1.0.2"
 
-esbuild@^0.3.2:
-  version "0.3.2"
-  resolved "https://registry.yarnpkg.com/esbuild/-/esbuild-0.3.2.tgz#3f6bdfbf51b2e776bb57952691930097b3770705"
-  integrity sha512-sm5o2D/nHhXSrs2D4UySNeyjSxJlgxQ6Ze2Cy6OOIJqbuDd/u6sMtiSn243bAEiyyYzlazueeryrrWJJCkv8lA==
+esbuild@^0.4.1:
+  version "0.4.1"
+  resolved "https://registry.yarnpkg.com/esbuild/-/esbuild-0.4.1.tgz#c746146278b8f71d9de473304ed89f5a9deccdea"
+  integrity sha512-84KjyYa1hgrHe01Qrsbf+anzcWWf6EA51TtRzZwLtphNd/Zf+V/fBT0jd3I+F+p+gB7+MFAS9pw4pxXOWPhHkA==
 
 escape-html@^1.0.3:
   version "1.0.3"
@@ -4797,6 +4802,11 @@ modify-values@^1.0.0:
   resolved "https://registry.yarnpkg.com/modify-values/-/modify-values-1.0.1.tgz#b3939fa605546474e3e3e3c63d64bd43b4ee6022"
   integrity sha512-xV2bxeN6F7oYjZWTe/YPAy6MN2M+sL4u/Rlm2AHCIVGfo2p1yGmBHQ6vHehl4bRTZBdHu3TSkWdYgkwpYzAGSw==
 
+moment@^2.26.0:
+  version "2.26.0"
+  resolved "https://registry.yarnpkg.com/moment/-/moment-2.26.0.tgz#5e1f82c6bafca6e83e808b30c8705eed0dcbd39a"
+  integrity sha512-oIixUO+OamkUkwjhAVE18rAMfRJNsNe/Stid/gwHSOfHrOtw9EhAY2AHvdKZ/k/MggcYELFCJz/Sn2pL8b8JMw==
+
 ms@2.0.0:
   version "2.0.0"
   resolved "https://registry.yarnpkg.com/ms/-/ms-2.0.0.tgz#5608aeadfc00be6c2901df5f9861788de0d597c8"
@@ -4857,6 +4867,11 @@ nice-try@^1.0.4:
   version "1.0.5"
   resolved "https://registry.yarnpkg.com/nice-try/-/nice-try-1.0.5.tgz#a3378a7696ce7d223e88fc9b764bd7ef1089e366"
   integrity sha512-1nh45deeb5olNY7eX82BkPO7SSxR5SSYJiPTrTdFUVYwAl8CKMA5N9PjTYkHiRjisVcxcQ1HXdLhx2qxxJzLNQ==
+
+node-forge@0.9.0:
+  version "0.9.0"
+  resolved "http://registry.yarnpkg.com/node-forge/-/node-forge-0.9.0.tgz#d624050edbb44874adca12bb9a52ec63cb782579"
+  integrity sha1-1iQFDtu0SHStyhK7mlLsY8t4JXk=
 
 node-int64@^0.4.0:
   version "0.4.0"
@@ -6285,10 +6300,10 @@ rollup-plugin-terser@^5.3.0:
     serialize-javascript "^2.1.2"
     terser "^4.6.2"
 
-rollup-plugin-vue@^6.0.0-beta.1:
-  version "6.0.0-beta.1"
-  resolved "https://registry.yarnpkg.com/rollup-plugin-vue/-/rollup-plugin-vue-6.0.0-beta.1.tgz#6334f3d76867f761623ba34c54a34a58a8d7ed24"
-  integrity sha512-jML9JYr+ZMQ1xUfMSgNzJ5kcv0kM+js9DJNBrUmvp1Lhydx8X4b3VOtybr0Dch5V3hUeBdxtKQgopadBnY9axA==
+rollup-plugin-vue@^6.0.0-beta.3:
+  version "6.0.0-beta.3"
+  resolved "https://registry.yarnpkg.com/rollup-plugin-vue/-/rollup-plugin-vue-6.0.0-beta.3.tgz#cbac4e3bff1aa1cd8a57cf7b2cb061c8e7256446"
+  integrity sha512-v/Ezn62J3L5fSRCyu40J7XIXTcW1UJkwz8ND/Bwh4v35lqtReci7lwnksz8dYmaf74eAL6DDrTmNjf8+D0r2YA==
   dependencies:
     debug "^4.1.1"
     hash-sum "^2.0.0"
@@ -6375,6 +6390,13 @@ saxes@^3.1.9:
   integrity sha512-Ydydq3zC+WYDJK1+gRxRapLIED9PWeSuuS41wqyoRmzvhhh9nc+QQrVMKJYzJFULazeGhzSV0QleN2wD3boh2g==
   dependencies:
     xmlchars "^2.1.1"
+
+selfsigned@^1.10.7:
+  version "1.10.7"
+  resolved "http://registry.yarnpkg.com/selfsigned/-/selfsigned-1.10.7.tgz#da5819fd049d5574f28e88a9bcc6dbc6e6f3906b"
+  integrity sha1-2lgZ/QSdVXTyjoipvMbbxubzkGs=
+  dependencies:
+    node-forge "0.9.0"
 
 semver-compare@^1.0.0:
   version "1.0.0"

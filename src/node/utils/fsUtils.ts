@@ -29,7 +29,7 @@ export async function cachedRead(
   const cached = moduleReadCache.get(file)
   if (ctx) {
     ctx.set('Cache-Control', 'no-cache')
-    ctx.type = path.basename(file)
+    ctx.type = path.extname(file) || 'js'
   }
   if (cached && cached.lastModified === lastModified) {
     if (ctx) {
@@ -92,7 +92,7 @@ export function lookupFile(
 ): string | undefined {
   for (const format of formats) {
     const fullPath = path.join(dir, format)
-    if (fs.existsSync(fullPath)) {
+    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
       return pathOnly ? fullPath : fs.readFileSync(fullPath, 'utf-8')
     }
   }

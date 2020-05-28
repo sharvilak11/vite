@@ -1,5 +1,4 @@
 import type { UserConfig } from 'vite'
-import { sassPlugin } from './plugins/sassPlugin'
 import { jsPlugin } from './plugins/jsPlugin'
 
 const config: UserConfig = {
@@ -9,7 +8,10 @@ const config: UserConfig = {
   jsx: 'preact',
   minify: false,
   serviceWorker: !!process.env.USE_SW,
-  plugins: [sassPlugin, jsPlugin]
+  plugins: [jsPlugin],
+  optimizeDeps: {
+    commonJSWhitelist: ['moment']
+  }
 }
 
 export default config

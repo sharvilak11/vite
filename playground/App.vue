@@ -4,11 +4,9 @@
     <code>__DEV__: {{ dev }}</code>
   </p>
   <p class="base">
-    <code>__BASE__: {{ base }}</code>
+    <code>process.env.BASE_URL: {{ base }}</code>
   </p>
-  <p class="node_env">
-    <code>process.env.NODE_ENV: {{ env }}</code>
-  </p>
+  <TestEnv />
   <h2>Async Component</h2>
   <TestAsync />
   <TestModuleResolve />
@@ -24,10 +22,12 @@
   <TestJsx />
   <TestAlias />
   <TestTransform />
+  <TestRewriteOptimized />
 </template>
 
 <script>
 import { defineAsyncComponent } from 'vue'
+import TestEnv from './TestEnv.vue'
 import TestModuleResolve from './TestModuleResolve.vue'
 import TestHmr from './TestHmr.vue'
 import TestPostCss from './TestPostCss.vue'
@@ -41,14 +41,15 @@ import TestTs from './ts/TestTs.vue'
 import TestJsx from './TestJsx.vue'
 import TestAlias from './TestAlias.vue'
 import TestTransform from './TestTransform.vue'
+import TestRewriteOptimized from "./rewrite-optimized/TestRewriteOptimized.vue";
 
 export default {
   data: () => ({
     dev: __DEV__,
-    base: __BASE__,
-    env: process.env.NODE_ENV
+    base: process.env.BASE_URL
   }),
   components: {
+    TestEnv,
     TestModuleResolve,
     TestHmr,
     TestPostCss,
@@ -62,7 +63,8 @@ export default {
     TestJsx,
     TestAlias,
     TestTransform,
-    TestAsync: defineAsyncComponent(() => import('./TestAsync.vue'))
+    TestAsync: defineAsyncComponent(() => import('./TestAsync.vue')),
+    TestRewriteOptimized
   }
 }
 </script>

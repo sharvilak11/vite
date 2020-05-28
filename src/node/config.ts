@@ -1,9 +1,7 @@
 import path from 'path'
 import fs from 'fs-extra'
 import chalk from 'chalk'
-import { createEsbuildPlugin } from './build/buildPluginEsbuild'
-import { ServerPlugin } from './server'
-import { Resolver } from './resolver'
+import dotenv, { DotenvParseOutput } from 'dotenv'
 import { Options as RollupPluginVueOptions } from 'rollup-plugin-vue'
 import { CompilerOptions } from '@vue/compiler-sfc'
 import Rollup, {
@@ -11,9 +9,14 @@ import Rollup, {
   OutputOptions as RollupOutputOptions,
   OutputChunk
 } from 'rollup'
+import { createEsbuildPlugin } from './build/buildPluginEsbuild'
+import { ServerPlugin } from './server'
+import { Resolver } from './resolver'
 import { Transform } from './transform'
 import { DepOptimizationOptions } from './depOptimizer'
 import { IKoaProxiesOptions } from 'koa-proxies'
+import { ServerOptions } from 'https'
+import { lookupFile } from './utils'
 
 export { Resolver, Transform }
 
@@ -81,9 +84,24 @@ export interface SharedConfig {
         factory?: string
         fragment?: string
       }
+  /**
+   * Environment variables
+   */
+  env?: DotenvParseOutput
+  /**
+   * Environment mode
+   */
+  mode?: string
 }
 
 export interface ServerConfig extends SharedConfig {
+  port?: number
+  open?: boolean
+  /**
+   * Configure https.
+   */
+  https?: boolean
+  httpsOption?: ServerOptions
   /**
    * Configure custom proxy rules for the dev server. Uses
    * [`koa-proxies`](https://github.com/vagusX/koa-proxies) which in turn uses
@@ -145,6 +163,13 @@ export interface BuildConfig extends SharedConfig {
    * @default 4096
    */
   assetsInlineLimit?: number
+  /**
+   * Whether to code-split CSS. When enabled, CSS in async chunks will be
+   * inlined as strings in the chunk and inserted via dynamically created
+   * style tags when the chunk is loaded.
+   * @default true
+   */
+  cssCodeSplit?: boolean
   /**
    * Whether to generate sourcemap
    * @default false
@@ -232,23 +257,32 @@ export interface Plugin
     | 'rollupOutputOptions'
   > {}
 
-export type ResolvedConfig = UserConfig & { __path?: string }
+export type ResolvedConfig = UserConfig & {
+  /**
+   * Path of config file.
+   */
+  __path?: string
+}
+
+const debug = require('debug')('vite:config')
 
 export async function resolveConfig(
-  configPath: string | undefined
+  mode: string,
+  configPath?: string
 ): Promise<ResolvedConfig | undefined> {
   const start = Date.now()
+  const cwd = process.cwd()
   let config: ResolvedConfig | undefined
   let resolvedPath: string | undefined
   let isTS = false
   if (configPath) {
-    resolvedPath = path.resolve(process.cwd(), configPath)
+    resolvedPath = path.resolve(cwd, configPath)
   } else {
-    const jsConfigPath = path.resolve(process.cwd(), 'vite.config.js')
+    const jsConfigPath = path.resolve(cwd, 'vite.config.js')
     if (fs.existsSync(jsConfigPath)) {
       resolvedPath = jsConfigPath
     } else {
-      const tsConfigPath = path.resolve(process.cwd(), 'vite.config.ts')
+      const tsConfigPath = path.resolve(cwd, 'vite.config.ts')
       if (fs.existsSync(tsConfigPath)) {
         isTS = true
         resolvedPath = tsConfigPath
@@ -279,14 +313,14 @@ export async function resolveConfig(
       // 2. if we reach here, the file is ts or using es import syntax.
       // transpile es import syntax to require syntax using rollup.
       const rollup = require('rollup') as typeof Rollup
-      const esbuilPlugin = await createEsbuildPlugin(false, {})
+      const esbuildPlugin = await createEsbuildPlugin(false, {})
       const bundle = await rollup.rollup({
         external: (id: string) =>
           (id[0] !== '.' && !path.isAbsolute(id)) ||
           id.slice(-5, id.length) === '.json',
         input: resolvedPath,
         treeshake: false,
-        plugins: [esbuilPlugin]
+        plugins: [esbuildPlugin]
       })
 
       const {
@@ -311,9 +345,12 @@ export async function resolveConfig(
       }
     }
 
-    require('debug')('vite:config')(
-      `config resolved in ${Date.now() - start}ms`
-    )
+    // load environment variables
+    const env = loadEnv(mode, config.root || cwd)
+    debug(`env: %O`, env)
+    config.env = env
+
+    debug(`config resolved in ${Date.now() - start}ms`)
 
     config.__path = resolvedPath
     return config
@@ -376,4 +413,31 @@ function resolvePlugin(config: UserConfig, plugin: Plugin): UserConfig {
       ...plugin.rollupOutputOptions
     }
   }
+}
+
+function loadEnv(mode: string, root: string): Record<string, string> {
+  debug(`env mode: ${mode}`)
+  const envFiles = [
+    /** default file */ `.env`,
+    /** local file */ `.env.local`,
+    /** mode file */ `.env.${mode}`,
+    /** mode local file */ `.env.${mode}.local`
+  ]
+
+  const env: Record<string, string> = {}
+  for (const file of envFiles) {
+    const path = lookupFile(root, [file], true)
+    if (path) {
+      const result = dotenv.config({
+        debug: !!process.env.DEBUG || undefined,
+        path
+      })
+      if (result.error) {
+        throw result.error
+      }
+      Object.assign(env, result.parsed)
+    }
+  }
+
+  return env
 }

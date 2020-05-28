@@ -1,6 +1,6 @@
 # vite ⚡
 
-[![vuejs](https://circleci.com/gh/vuejs/vite.svg?style=shield)](https://app.circleci.com/pipelines/github/vuejs/vite) [![Build status](https://ci.appveyor.com/api/projects/status/a6gd7l0s0wysn3qm/branch/master?svg=true)](https://ci.appveyor.com/project/yyx990803/vite/branch/master)
+[![vuejs](https://circleci.com/gh/vitejs/vite.svg?style=shield)](https://app.circleci.com/pipelines/github/vuejs/vite) [![Build status](https://ci.appveyor.com/api/projects/status/0q4j8062olbcs71l/branch/master?svg=true)](https://ci.appveyor.com/project/yyx990803/vite/branch/master)
 
 Vite is an opinionated web dev build tool that serves your code via native ES Module imports during dev and bundles it with [Rollup](https://rollupjs.org/) for production.
 
@@ -16,7 +16,7 @@ Still experimental, but we intend to make it suitable for production.
 ## Getting Started
 
 ```bash
-$ npx create-vite-app <project-name>
+$ npm init vite-app <project-name>
 $ cd <project-name>
 $ npm install
 $ npm run dev
@@ -31,7 +31,7 @@ $ yarn
 $ yarn dev
 ```
 
-> Although Vite is primarily designed to work with Vue 3, it can actually support other frameworks as well. For example, try `npx create-vite-app` with `--template react` or `--template preact`.
+> Although Vite is primarily designed to work with Vue 3, it can support other frameworks as well. For example, try `npm init vite-app --template react` or `--template preact`.
 
 ## Browser Support
 
@@ -53,6 +53,7 @@ Vite assumes you are targeting modern browsers and therefore does not perform an
 - [Config File](#config-file)
 - [Dev Server Proxy](#dev-server-proxy)
 - [Production Build](#production-build)
+- [Modes and Environment Variables](#modes-and-environment-variables)
 
 Vite tries to mirror the default configuration in [vue-cli](http://cli.vuejs.org/) as much as possible. If you've used `vue-cli` or other webpack-based boilerplates before, you should feel right at home. That said, do expect things to be different here and there.
 
@@ -70,41 +71,40 @@ Note that `vue` has special treatment - if it isn't installed in the project loc
 
 ### Hot Module Replacement
 
-- `*.vue` files come with HMR out of the box.
+- The `vue`, `react` and `preact` templates of `create-vite-app` all come with HMR out of the box.
 
-- For `*.js` files, a simple HMR API is provided:
+- For manual HMR, an API is provided via `import.meta.hot`.
+
+  For a module to self-accept, use `import.meta.hot.accept`:
+
+  ```js
+  export const count = 1
+
+  // the conditional check is required so that HMR related code can be
+  // dropped in production
+  if (import.meta.hot) {
+    import.meta.hot.accept((newModule) => {
+      console.log('updated: count is now ', newModule.count)
+    })
+  }
+  ```
+
+  A module can also accept updates from direct dependencies without reloading itself, using `import.meta.hot.acceptDeps`:
 
   ```js
   import { foo } from './foo.js'
-  import { hot } from 'vite/hmr'
 
   foo()
 
-  // this code will be stripped out when building
-  if (__DEV__) {
-    hot.accept('./foo.js', (newFoo) => {
+  if (import.meta.hot) {
+    import.meta.hot.acceptDeps('./foo.js', (newFoo) => {
       // the callback receives the updated './foo.js' module
       newFoo.foo()
     })
 
     // Can also accept an array of dep modules:
-    hot.accept(['./foo.js', './bar.js'], ([newFooModule, newBarModule]) => {
+    import.meta.hot.acceptDeps(['./foo.js', './bar.js'], ([newFooModule, newBarModule]) => {
       // the callback receives the updated mdoules in an Array
-    })
-  }
-  ```
-
-  Modules can also be self-accepting:
-
-  ```js
-  import { hot } from 'vite/hmr'
-
-  export const count = 1
-
-  // this code will be stripped out when building
-  if (__DEV__) {
-    hot.accept((newModule) => {
-      console.log('updated: count is now ', newModule.count)
     })
   }
   ```
@@ -112,17 +112,18 @@ Note that `vue` has special treatment - if it isn't installed in the project loc
   A self-accepting module, or a module that expects to be accepted by others can use `hot.dispose` to cleanup any persistent side effects created by its updated copy:
 
   ```js
-  import { hot } from 'vite/hmr'
-
   function setupSideEffect() {}
-  function cleanupSideEffect() {}
 
   setupSideEffect()
 
-  if (__DEV__) {
-    hot.dispose(cleanupSideEffect)
+  if (import.meta.hot) {
+    import.meta.hot.dispose((data) => {
+      // cleanup side effect
+    })
   }
   ```
+
+  For the full API, consult [hmr.d.ts](https://github.com/vitejs/vite/blob/master/hmr.d.ts).
 
   Note that Vite's HMR does not actually swap the originally imported module: if an accepting module re-exports imports from a dep, then it is responsible for updating those re-exports (and these exports must be using `let`). In addition, importers up the chain from the accepting module will not be notified of the change.
 
@@ -154,15 +155,25 @@ You can reference static assets in your `*.vue` templates, styles and plain `.cs
 
 All referenced assets, including those using absolute paths, will be copied to the dist folder with a hashed file name in the production build. Never-referenced assets will not be copied. Similar to `vue-cli`, image assets smaller than 4kb will be base64 inlined.
 
-The exception is the `public` directory - assets placed in this directory will be copied to the dist directory as-is. It can be used to provide assets that are never referenced in your code - e.g. `robots.txt`.
+All **static** path references, including absolute paths, should be based on your working directory structure.
 
-All **static** path references, including absolute paths and those starting with `/public`, should be based on your working directory structure. If you are deploying your project under a nested public path, simply specify `--base=/your/public/path/` and all asset paths will be rewritten accordingly.
+#### The `public` Directory
+
+The `public` directory under project root can be used as an escape hatch to provide static assets that either are never referenced in source code (e.g. `robots.txt`), or must retain the exact same file name (without hashing).
+
+Assets placed in `public` will be copied to the root of the dist directory as-is.
+
+Note that you should reference files placed in `public` using root absolute path - for example, `public/icon.png` should always be referenced in source code as `/icon.png`.
+
+#### Public Base Path
+
+If you are deploying your project under a nested public path, simply specify `--base=/your/public/path/` and all asset paths will be rewritten accordingly.
 
 For dynamic path references, there are two options:
 
 - You can get the resolved public path of a static asset file by importing it from JavaScript. e.g. `import path from './foo.png'` will give you its resolved public path as a string.
 
-- If you need to concatenate paths on the fly, you can use the globally injected `__BASE__` variable with will be the public base path.
+- If you need to concatenate paths on the fly, you can use the globally injected `process.env.BASE_URL` variable with will be the public base path. Note this variable is statically replaced during build so it must appear exactly as-is (i.e. `process.env['BASE_URL']` won't work).
 
 ### PostCSS
 
@@ -186,13 +197,17 @@ yarn add -D sass
 </style>
 ```
 
-Note importing CSS / preprocessor files from `.js` files, and HMR from imported pre-processor files are currently not supported, but can be in the future.
+Or import them from JavaScript:
+
+```js
+import './style.scss'
+```
 
 ### JSX
 
-`.jsx` and `.tsx` files are also supported. JSX transpilation is also handled via `esbuild`. Note that there is currently no auto-HMR support for any JSX-based usage.
+`.jsx` and `.tsx` files are also supported. JSX transpilation is also handled via `esbuild`.
 
-The default JSX configuration works out of the box with Vue 3:
+The default JSX configuration works out of the box with Vue 3 (note there is currently no JSX-based HMR for Vue):
 
 ```jsx
 import { createApp } from 'vue'
@@ -212,17 +227,21 @@ Currently this is auto-importing a `jsx` compatible function that converts esbui
 
 #### JSX with React/Preact
 
-There are two other presets provided: `react` and `preact`. You can specify the preset by running Vite with `--jsx react` or `--jsx preact`. For the Preact preset, `h` is also auto injected so you don't need to manually import it.
+There are two other presets provided: `react` and `preact`. You can specify the preset by running Vite with `--jsx react` or `--jsx preact`.
 
-Because React doesn't ship ES module builds, you either need to use [es-react](https://github.com/lukejacksonn/es-react), or pre-bundle React into a ES module with Snowpack. Easiest way to get it running is:
+If you need a custom JSX pragma, JSX can also be customized via `--jsx-factory` and `--jsx-fragment` flags from the CLI or `jsx: { factory, fragment }` from the API. For example, you can run `vite --jsx-factory=h` to use `h` for JSX element creation calls. In the config (see [Config File](#config-file) below), it can be specified as:
 
 ```js
-import { React, ReactDOM } from 'https://unpkg.com/es-react'
-
-ReactDOM.render(<h1>Hello, what!</h1>, document.getElementById('app'))
+// vite.config.js
+module.exports = {
+  jsx: {
+    factory: 'h',
+    fragment: 'Fragment'
+  }
+}
 ```
 
-If you need a custom JSX pragma, JSX can also be customized via `--jsx-factory` and `--jsx-fragment` flags from the CLI or `jsx: { factory, fragment }` from the API. For example, you can run `vite --jsx-factory=h` to use `h` for JSX element creation calls.
+Note that for the Preact preset, `h` is also auto injected so you don't need to manually import it. However, this may cause issues if you are using `.tsx` with Preact since TS expects `h` to be explicitly imported for type inference. In that case, you can use the explicit factory config shown above which disables the auto `h` injection.
 
 ### Config File
 
@@ -261,6 +280,31 @@ Vite does utilize bundling for production builds, because native ES module impor
 You can run `vite build` to bundle the app.
 
 Internally, we use a highly opinionated Rollup config to generate the build. The build is configurable by passing on most options to Rollup - and most non-rollup string/boolean options have mapping flags in the CLI (see [build/index.ts](https://github.com/vuejs/vite/blob/master/src/node/build/index.ts) for full details).
+
+### Modes and Environment Variables
+
+> 0.16.7+
+
+The mode option is used to specify the value of `process.env.NODE_ENV` and the corresponding environment variables files that needs to be loaded.
+
+By default, there are two modes:
+  - `development` is used by `vite` and `vite serve`
+  - `production` is used by `vite build`
+
+You can overwrite the default mode used for a command by passing the `--mode` option flag. For example, if you want to use development variables in the build command:
+
+```bash
+vite build --mode development
+```
+
+When running `vite`, environment variables are loaded from the following files in your project root:
+
+```
+.env                # loaded in all cases
+.env.local          # loaded in all cases, ignored by git
+.env.[mode]         # only loaded in specified env mode
+.env.[mode].local   # only loaded in specified env mode, ignored by git
+```
 
 ## API
 
@@ -363,13 +407,15 @@ Finally, because compilation is still done in Node, it can technically support a
 
 ### How is This Different from [Snowpack](https://www.snowpack.dev/)?
 
-Snowpack 2 is closer to Vite in scope - both offer bundle-free dev servers and can bundle the app for production. Some notable differences are:
+Both Snowpack v2 and Vite offer native ES module import based dev servers. Vite's dependency pre-optimization is also heavily inspired by Snowpack v1. Both projects share similar performance characteristics when it comes to development feedback speed. Some notable differences are:
 
-- Specifically for Vue, Vite provides built-in HMR, while Snowpack simply reloads the page on any file edit. Since both solutions rely on native ES imports, the network waterfall of full page reloads can actually become the bottleneck in edit-to-feedback speed. HMR allows you to avoid reloading the page for a decent part of your development time.
+- Vite was created to tackle native ESM-based HMR. When Vite was first released with working ESM-based HMR, there was no other project actively trying to bring native ESM based HMR to production.
 
-- Vite is a bit more opinionated and aims to minimize the amount of configuration required. All the features listed above like TypeScript transpilation, CSS import, and PostCSS support work out of the box.
+  Snowpack v2 initially did not offer HMR support but added it in a later release, making the scope of two projects much closer. Vite and Snowpack has collaborated on a common API spec for ESM HMR, but due to the constraints of different implementation strategies, the two projects still ship slightly different APIs.
 
-- While Vite can technically be used to develop apps with any framework, its main focus is to provide the best Vue development experience possible. 3rd party frameworks are supported, but not as the utmost priority.
+- Vite is more opinionated and supports more opt-in features by default - for example, features listed above like TypeScript transpilation, CSS import, CSS modules and PostCSS support all work out of the box without the need for configuration.
+
+- Both solutions can also bundle the app for production, but Vite uses Rollup while Snowpack delegates it to Parcel/webpack. This isn't a significant difference, but worth being aware of if you intend to customize the build.
 
 ## Trivia
 

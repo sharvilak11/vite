@@ -13,25 +13,20 @@ import { resolveCompiler } from '../utils/resolveVue'
 import hash_sum from 'hash-sum'
 import LRUCache from 'lru-cache'
 import {
-  hmrClientId,
   debugHmr,
   importerMap,
-  ensureMapEntry
+  ensureMapEntry,
+  hmrClientPublicPath
 } from './serverPluginHmr'
-import {
-  resolveFrom,
-  cachedRead,
-  genSourceMapString,
-  loadPostcssConfig,
-  cleanUrl,
-  resolveRelativeRequest
-} from '../utils'
+import { resolveFrom, cachedRead, genSourceMapString, cleanUrl } from '../utils'
 import { Context } from 'koa'
 import { transform } from '../esbuildService'
 import { InternalResolver } from '../resolver'
-import qs from 'querystring'
 import { seenUrls } from './serverPluginServeStatic'
-import { rewriteCssUrls } from '../utils/cssUtils'
+import { codegenCss, compileCss, rewriteCssUrls } from '../utils/cssUtils'
+import { parse } from '../utils/babelParse'
+import MagicString from 'magic-string'
+import { resolveImport } from './serverPluginModuleRewrite'
 
 const debug = require('debug')('vite:sfc')
 const getEtag = require('etag')
@@ -75,10 +70,10 @@ export const vuePlugin: ServerPlugin = ({
 
     const query = ctx.query
     const publicPath = ctx.path
-    let filename = resolver.requestToFile(publicPath)
+    let filePath = resolver.requestToFile(publicPath)
 
     // upstream plugins could've already read the file
-    const descriptor = await parseSFC(root, filename, ctx.body)
+    const descriptor = await parseSFC(root, filePath, ctx.body)
     if (!descriptor) {
       debug(`${ctx.url} - 404`)
       ctx.status = 404
@@ -87,23 +82,28 @@ export const vuePlugin: ServerPlugin = ({
 
     if (!query.type) {
       if (descriptor.script && descriptor.script.src) {
-        filename = await resolveSrcImport(descriptor.script, ctx, resolver)
+        filePath = await resolveSrcImport(
+          root,
+          descriptor.script,
+          ctx,
+          resolver
+        )
       }
       ctx.type = 'js'
-      ctx.body = await compileSFCMain(descriptor, filename, publicPath)
+      ctx.body = await compileSFCMain(descriptor, filePath, publicPath)
       return etagCacheCheck(ctx)
     }
 
     if (query.type === 'template') {
       const templateBlock = descriptor.template!
       if (templateBlock.src) {
-        filename = await resolveSrcImport(templateBlock, ctx, resolver)
+        filePath = await resolveSrcImport(root, templateBlock, ctx, resolver)
       }
       ctx.type = 'js'
       ctx.body = compileSFCTemplate(
         root,
         templateBlock,
-        filename,
+        filePath,
         publicPath,
         descriptor.styles.some((s) => s.scoped),
         config.vueCompilerOptions
@@ -115,80 +115,195 @@ export const vuePlugin: ServerPlugin = ({
       const index = Number(query.index)
       const styleBlock = descriptor.styles[index]
       if (styleBlock.src) {
-        filename = await resolveSrcImport(styleBlock, ctx, resolver)
+        filePath = await resolveSrcImport(root, styleBlock, ctx, resolver)
       }
+      const id = hash_sum(publicPath)
       const result = await compileSFCStyle(
         root,
         styleBlock,
         index,
-        filename,
+        filePath,
         publicPath
       )
-      if (query.module != null) {
-        ctx.type = 'js'
-        ctx.body = `export default ${JSON.stringify(result.modules)}`
-      } else {
-        ctx.type = 'js'
-        ctx.body = `export default ${JSON.stringify(result.code)}`
-      }
+      ctx.type = 'js'
+      ctx.body = codegenCss(`${id}-${index}`, result.code, result.modules)
       return etagCacheCheck(ctx)
     }
 
     // TODO custom blocks
   })
 
-  // handle HMR for <style src="xxx.css">
-  // it cannot be handled as simple css import because it may be scoped
-  watcher.on('change', (file) => {
-    const styleImport = srcImportMap.get(file)
-    if (styleImport) {
-      vueCache.del(file)
-      const publicPath = cleanUrl(styleImport)
-      const index = qs.parse(styleImport.split('?', 2)[1]).index
-      console.log(chalk.green(`[vite:hmr] `) + `${publicPath} updated. (style)`)
-      watcher.send({
-        type: 'vue-style-update',
+  const handleVueReload = (watcher.handleVueReload = async (
+    filePath: string,
+    timestamp: number = Date.now(),
+    content?: string
+  ) => {
+    const publicPath = resolver.fileToRequest(filePath)
+    const cacheEntry = vueCache.get(filePath)
+    const { send } = watcher
+
+    debugHmr(`busting Vue cache for ${filePath}`)
+    vueCache.del(filePath)
+
+    const descriptor = await parseSFC(root, filePath, content)
+    if (!descriptor) {
+      // read failed
+      return
+    }
+
+    const prevDescriptor = cacheEntry && cacheEntry.descriptor
+    if (!prevDescriptor) {
+      // the file has never been accessed yet
+      debugHmr(`no existing descriptor found for ${filePath}`)
+      return
+    }
+
+    // check which part of the file changed
+    let needRerender = false
+
+    const sendReload = () => {
+      send({
+        type: 'vue-reload',
         path: publicPath,
-        index: Number(index),
-        id: `${hash_sum(publicPath)}-${index}`,
-        timestamp: Date.now()
+        timestamp
       })
+      console.log(
+        chalk.green(`[vite:hmr] `) +
+          `${path.relative(root, filePath)} updated. (reload)`
+      )
+    }
+
+    if (!isEqualBlock(descriptor.script, prevDescriptor.script)) {
+      return sendReload()
+    }
+
+    if (!isEqualBlock(descriptor.template, prevDescriptor.template)) {
+      needRerender = true
+    }
+
+    let didUpdateStyle = false
+    const styleId = hash_sum(publicPath)
+    const prevStyles = prevDescriptor.styles || []
+    const nextStyles = descriptor.styles || []
+
+    // css modules update causes a reload because the $style object is changed
+    // and it may be used in JS. It also needs to trigger a vue-style-update
+    // event so the client busts the sw cache.
+    if (
+      prevStyles.some((s) => s.module != null) ||
+      nextStyles.some((s) => s.module != null)
+    ) {
+      return sendReload()
+    }
+
+    if (prevStyles.some((s) => s.scoped) !== nextStyles.some((s) => s.scoped)) {
+      needRerender = true
+    }
+
+    // only need to update styles if not reloading, since reload forces
+    // style updates as well.
+    nextStyles.forEach((_, i) => {
+      if (!prevStyles[i] || !isEqualBlock(prevStyles[i], nextStyles[i])) {
+        didUpdateStyle = true
+        send({
+          type: 'style-update',
+          path: `${publicPath}?type=style&index=${i}`,
+          timestamp
+        })
+      }
+    })
+
+    // stale styles always need to be removed
+    prevStyles.slice(nextStyles.length).forEach((_, i) => {
+      didUpdateStyle = true
+      send({
+        type: 'style-remove',
+        path: publicPath,
+        id: `${styleId}-${i + nextStyles.length}`,
+        timestamp
+      })
+    })
+
+    if (needRerender) {
+      send({
+        type: 'vue-rerender',
+        path: publicPath,
+        timestamp
+      })
+    }
+
+    let updateType = []
+    if (needRerender) {
+      updateType.push(`template`)
+    }
+    if (didUpdateStyle) {
+      updateType.push(`style`)
+    }
+    if (updateType.length) {
+      console.log(
+        chalk.green(`[vite:hmr] `) +
+          `${path.relative(root, filePath)} updated. (${updateType.join(
+            ' & '
+          )})`
+      )
+    }
+  })
+
+  watcher.on('change', (file) => {
+    if (file.endsWith('.vue')) {
+      handleVueReload(file)
     }
   })
 }
 
+function isEqualBlock(a: SFCBlock | null, b: SFCBlock | null) {
+  if (!a && !b) return true
+  if (!a || !b) return false
+  if (a.content.length !== b.content.length) return false
+  if (a.content !== b.content) return false
+  const keysA = Object.keys(a.attrs)
+  const keysB = Object.keys(b.attrs)
+  if (keysA.length !== keysB.length) {
+    return false
+  }
+  return keysA.every((key) => a.attrs[key] === b.attrs[key])
+}
+
 async function resolveSrcImport(
+  root: string,
   block: SFCBlock,
   ctx: Context,
   resolver: InternalResolver
 ) {
   const importer = ctx.path
-  const importee = resolveRelativeRequest(importer, block.src!).url
-  const filename = resolver.requestToFile(importee)
-  await cachedRead(ctx, filename)
+  const importee = cleanUrl(
+    resolveImport(process.cwd(), importer, block.src!, resolver)
+  )
+  const filePath = resolver.requestToFile(importee)
+  await cachedRead(ctx, filePath)
   block.content = ctx.body
 
   // register HMR import relationship
   debugHmr(`        ${importer} imports ${importee}`)
   ensureMapEntry(importerMap, importee).add(ctx.path)
-  srcImportMap.set(filename, ctx.url)
-  return filename
+  srcImportMap.set(filePath, ctx.url)
+  return filePath
 }
 
 export async function parseSFC(
   root: string,
-  filename: string,
+  filePath: string,
   content?: string | Buffer
 ): Promise<SFCDescriptor | undefined> {
-  let cached = vueCache.get(filename)
+  let cached = vueCache.get(filePath)
   if (cached && cached.descriptor) {
-    debug(`${filename} parse cache hit`)
+    debug(`${filePath} parse cache hit`)
     return cached.descriptor
   }
 
   if (!content) {
     try {
-      content = await cachedRead(null, filename)
+      content = await cachedRead(null, filePath)
     } catch (e) {
       return
     }
@@ -201,7 +316,7 @@ export async function parseSFC(
   const start = Date.now()
   const { parse, generateCodeFrame } = resolveCompiler(root)
   const { descriptor, errors } = parse(content, {
-    filename,
+    filename: filePath,
     sourceMap: true
   })
 
@@ -210,7 +325,7 @@ export async function parseSFC(
     errors.forEach((e) => {
       console.error(
         chalk.underline(
-          `${filename}:${e.loc!.start.line}:${e.loc!.start.column}`
+          `${filePath}:${e.loc!.start.line}:${e.loc!.start.column}`
         )
       )
       console.error(chalk.yellow(e.message))
@@ -226,10 +341,12 @@ export async function parseSFC(
 
   cached = cached || { styles: [] }
   cached.descriptor = descriptor
-  vueCache.set(filename, cached)
-  debug(`${filename} parsed in ${Date.now() - start}ms.`)
+  vueCache.set(filePath, cached)
+  debug(`${filePath} parsed in ${Date.now() - start}ms.`)
   return descriptor
 }
+
+const defaultExportRE = /((?:^|\n|;)\s*)export default/
 
 async function compileSFCMain(
   descriptor: SFCDescriptor,
@@ -241,23 +358,31 @@ async function compileSFCMain(
     return cached.script
   }
 
-  let code = ''
+  const id = hash_sum(publicPath)
+  let code = ``
   if (descriptor.script) {
     let content = descriptor.script.content
     if (descriptor.script.lang === 'ts') {
+      // TODO merge lang=ts source map
       content = (await transform(content, publicPath, { loader: 'ts' })).code
     }
-
-    code += content.replace(`export default`, 'const __script =')
+    // rewrite export default.
+    // fast path: simple regex replacement to avoid full-blown babel parse.
+    let replaced = content.replace(defaultExportRE, '$1const __script =')
+    // if the script somehow still contains `default export`, it probably has
+    // multi-line comments or template strings. fallback to a full parse.
+    if (defaultExportRE.test(replaced)) {
+      replaced = rewriteDefaultExport(content)
+    }
+    code += replaced
   } else {
     code += `const __script = {}`
   }
 
-  const id = hash_sum(publicPath)
   let hasScoped = false
   let hasCSSModules = false
   if (descriptor.styles) {
-    code += `\nimport { updateStyle } from "${hmrClientId}"\n`
+    code += `\nimport { updateStyle } from "${hmrClientPublicPath}"\n`
     descriptor.styles.forEach((s, i) => {
       const styleRequest = publicPath + `?type=style&index=${i}`
       if (s.scoped) hasScoped = true
@@ -272,9 +397,9 @@ async function compileSFCMain(
           styleRequest + '&module'
         )}`
         code += `\n__cssModules[${JSON.stringify(moduleName)}] = ${styleVar}`
+      } else {
+        code += `\nimport ${JSON.stringify(styleRequest)}`
       }
-      code += `\nimport css_${i} from ${JSON.stringify(styleRequest)}`
-      code += `\nupdateStyle("${id}-${i}", css_${i})`
     })
     if (hasScoped) {
       code += `\n__script.__scopeId = "data-v-${id}"`
@@ -282,8 +407,9 @@ async function compileSFCMain(
   }
 
   if (descriptor.template) {
+    const templateRequest = publicPath + `?type=template`
     code += `\nimport { render as __render } from ${JSON.stringify(
-      publicPath + `?type=template`
+      templateRequest
     )}`
     code += `\n__script.render = __render`
   }
@@ -304,12 +430,12 @@ async function compileSFCMain(
 function compileSFCTemplate(
   root: string,
   template: SFCTemplateBlock,
-  filename: string,
+  filePath: string,
   publicPath: string,
   scoped: boolean,
   userOptions: CompilerOptions | undefined
 ): string {
-  let cached = vueCache.get(filename)
+  let cached = vueCache.get(filePath)
   if (cached && cached.template) {
     debug(`${publicPath} template cache hit`)
     return cached.template
@@ -319,7 +445,7 @@ function compileSFCTemplate(
   const { compileTemplate, generateCodeFrame } = resolveCompiler(root)
   const { code, map, errors } = compileTemplate({
     source: template.content,
-    filename,
+    filename: filePath,
     inMap: template.map,
     transformAssetUrls: {
       base: path.posix.dirname(publicPath)
@@ -341,7 +467,7 @@ function compileSFCTemplate(
       } else {
         console.error(
           chalk.underline(
-            `${filename}:${e.loc!.start.line}:${e.loc!.start.column}`
+            `${filePath}:${e.loc!.start.line}:${e.loc!.start.column}`
           )
         )
         console.error(chalk.yellow(e.message))
@@ -357,7 +483,7 @@ function compileSFCTemplate(
   const finalCode = code + genSourceMapString(map)
   cached = cached || { styles: [] }
   cached.template = finalCode
-  vueCache.set(filename, cached)
+  vueCache.set(filePath, cached)
 
   debug(`${publicPath} template compiled in ${Date.now() - start}ms.`)
   return finalCode
@@ -367,10 +493,10 @@ async function compileSFCStyle(
   root: string,
   style: SFCStyleBlock,
   index: number,
-  filename: string,
+  filePath: string,
   publicPath: string
 ): Promise<SFCStyleCompileResults> {
-  let cached = vueCache.get(filename)
+  let cached = vueCache.get(filePath)
   const cachedEntry = cached && cached.styles && cached.styles[index]
   if (cachedEntry) {
     debug(`${publicPath} style cache hit`)
@@ -378,28 +504,17 @@ async function compileSFCStyle(
   }
 
   const start = Date.now()
-  const id = hash_sum(publicPath)
-  const postcssConfig = await loadPostcssConfig(root)
-  const { compileStyleAsync, generateCodeFrame } = resolveCompiler(root)
 
-  const result = await compileStyleAsync({
+  const { generateCodeFrame } = resolveCompiler(root)
+
+  const result = (await compileCss(root, publicPath, {
     source: style.content,
-    filename,
-    id: `data-v-${id}`,
+    filename: filePath,
+    id: ``, // will be computed in compileCss
     scoped: style.scoped != null,
     modules: style.module != null,
-    modulesOptions: {
-      generateScopedName: `[local]_${id}`
-    },
-    preprocessLang: style.lang as any,
-    preprocessCustomRequire: (id: string) => require(resolveFrom(root, id)),
-    ...(postcssConfig
-      ? {
-          postcssOptions: postcssConfig.options,
-          postcssPlugins: postcssConfig.plugins
-        }
-      : {})
-  })
+    preprocessLang: style.lang as any
+  })) as SFCStyleCompileResults
 
   if (result.errors.length) {
     console.error(chalk.red(`\n[vite] SFC style compilation error: `))
@@ -410,17 +525,17 @@ async function compileSFCStyle(
         const lineOffset = style.loc.start.line - 1
         if (e.line && e.column) {
           console.log(
-            chalk.underline(`${filename}:${e.line + lineOffset}:${e.column}`)
+            chalk.underline(`${filePath}:${e.line + lineOffset}:${e.column}`)
           )
         } else {
-          console.log(chalk.underline(filename))
+          console.log(chalk.underline(filePath))
         }
-        const filenameRE = new RegExp(
+        const filePathRE = new RegExp(
           '.*' +
-            path.basename(filename).replace(/[-[\]/{}()*+?.\\^$|]/g, '\\$&') +
+            path.basename(filePath).replace(/[-[\]/{}()*+?.\\^$|]/g, '\\$&') +
             '(:\\d+:\\d+:\\s*)?'
         )
-        const cleanMsg = e.message.replace(filenameRE, '')
+        const cleanMsg = e.message.replace(filePathRE, '')
         console.error(chalk.yellow(cleanMsg))
         if (e.line && e.column && cleanMsg.split(/\n/g).length === 1) {
           const original = style.map!.sourcesContent![0]
@@ -438,13 +553,24 @@ async function compileSFCStyle(
     })
   }
 
-  // rewrite relative urls
   result.code = await rewriteCssUrls(result.code, publicPath)
 
   cached = cached || { styles: [] }
   cached.styles[index] = result
-  vueCache.set(filename, cached)
+  vueCache.set(filePath, cached)
 
   debug(`${publicPath} style compiled in ${Date.now() - start}ms`)
   return result
+}
+
+function rewriteDefaultExport(code: string): string {
+  const s = new MagicString(code)
+  const ast = parse(code)
+  ast.forEach((node) => {
+    if (node.type === 'ExportDefaultDeclaration') {
+      s.overwrite(node.start!, node.declaration.start!, `const __script = `)
+    }
+  })
+  const ret = s.toString()
+  return ret
 }

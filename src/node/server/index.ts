@@ -1,4 +1,5 @@
-import http, { Server } from 'http'
+import { RequestListener, Server } from 'http'
+import { ServerOptions } from 'https'
 import Koa from 'koa'
 import chokidar from 'chokidar'
 import { createResolver, InternalResolver } from '../resolver'
@@ -14,9 +15,11 @@ import { esbuildPlugin } from './serverPluginEsbuild'
 import { ServerConfig } from '../config'
 import { createServerTransformPlugin } from '../transform'
 import { serviceWorkerPlugin } from './serverPluginServiceWorker'
-import { htmlPlugin } from './serverPluginHtml'
+import { htmlRewritePlugin } from './serverPluginHtml'
 import { proxyPlugin } from './serverPluginProxy'
-
+import { createCertificate } from '../utils/createCertificate'
+import fs from 'fs-extra'
+import path from 'path'
 export { rewriteImports } from './serverPluginModuleRewrite'
 
 export type ServerPlugin = (ctx: ServerPluginContext) => void
@@ -30,7 +33,7 @@ export interface ServerPluginContext {
   config: ServerConfig & { __path?: string }
 }
 
-export function createServer(config: ServerConfig = {}): Server {
+export function createServer(config: ServerConfig): Server {
   const {
     root = process.cwd(),
     configureServer = [],
@@ -41,7 +44,7 @@ export function createServer(config: ServerConfig = {}): Server {
   } = config
 
   const app = new Koa()
-  const server = http.createServer(app.callback())
+  const server = resolveServer(config, app.callback())
   const watcher = chokidar.watch(root, {
     ignored: [/node_modules/]
   }) as HMRWatcher
@@ -57,18 +60,21 @@ export function createServer(config: ServerConfig = {}): Server {
   }
 
   const resolvedPlugins = [
+    // the import rewrite and html rewrite both take highest priority and runs
+    // after all other middlewares have finished
+    moduleRewritePlugin,
+    htmlRewritePlugin,
+    // user plugins
     ...(Array.isArray(configureServer) ? configureServer : [configureServer]),
+    moduleResolvePlugin,
     proxyPlugin,
     serviceWorkerPlugin,
     hmrPlugin,
-    moduleRewritePlugin,
-    moduleResolvePlugin,
     vuePlugin,
     cssPlugin,
     ...(transforms.length ? [createServerTransformPlugin(transforms)] : []),
     esbuildPlugin,
     jsonPlugin,
-    htmlPlugin,
     assetPathPlugin,
     serveStaticPlugin
   ]
@@ -83,4 +89,43 @@ export function createServer(config: ServerConfig = {}): Server {
   }) as any
 
   return server
+}
+
+function resolveServer(
+  { https = false, httpsOption = {} }: ServerConfig,
+  requestListener: RequestListener
+) {
+  if (https) {
+    return require('https').createServer(
+      resolveHttpsConfig(httpsOption),
+      requestListener
+    )
+  } else {
+    return require('http').createServer(requestListener)
+  }
+}
+
+function resolveHttpsConfig(httpsOption: ServerOptions) {
+  const { ca, cert, key, pfx } = httpsOption
+  Object.assign(httpsOption, {
+    ca: readFileIfExits(ca),
+    cert: readFileIfExits(cert),
+    key: readFileIfExits(key),
+    pfx: readFileIfExits(pfx)
+  })
+  if (!httpsOption.key || !httpsOption.cert) {
+    httpsOption.cert = httpsOption.key = createCertificate()
+  }
+  return httpsOption
+}
+
+function readFileIfExits(value?: string | Buffer | any) {
+  if (value && !Buffer.isBuffer(value)) {
+    try {
+      return fs.readFileSync(path.resolve(value as string))
+    } catch (e) {
+      return value
+    }
+  }
+  return value
 }

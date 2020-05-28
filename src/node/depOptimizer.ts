@@ -3,13 +3,9 @@ import path from 'path'
 import { createHash } from 'crypto'
 import { ResolvedConfig } from './config'
 import type Rollup from 'rollup'
-import {
-  createResolver,
-  supportedExts,
-  resolveNodeModuleEntry
-} from './resolver'
-import { createBaseRollupPlugins } from './build'
-import { resolveFrom, lookupFile } from './utils'
+import { createResolver, supportedExts, resolveNodeModule } from './resolver'
+import { createBaseRollupPlugins, onRollupWarning } from './build'
+import { lookupFile } from './utils'
 import { init, parse } from 'es-module-lexer'
 import chalk from 'chalk'
 import { Ora } from 'ora'
@@ -120,17 +116,26 @@ export async function optimizeDeps(
       debug(`skipping ${id} (internal excluded)`)
       return false
     }
-    const pkgInfo = resolveNodeModuleEntry(root, id)
-    if (!pkgInfo) {
+    const pkgInfo = resolveNodeModule(root, id)
+    if (!pkgInfo || !pkgInfo.entryFilePath) {
       debug(`skipping ${id} (cannot resolve entry)`)
       return false
     }
-    const [entry, pkg] = pkgInfo
-    if (!supportedExts.includes(path.extname(entry))) {
+    const { entryFilePath, pkg } = pkgInfo
+    if (!supportedExts.includes(path.extname(entryFilePath))) {
       debug(`skipping ${id} (entry is not js)`)
       return false
     }
-    const content = fs.readFileSync(resolveFrom(root, entry), 'utf-8')
+    if (!fs.existsSync(entryFilePath)) {
+      debug(`skipping ${id} (entry file does not exist)`)
+      console.error(
+        chalk.yellow(
+          `[vite] dependency ${id} declares non-existent entry file ${entryFilePath}.`
+        )
+      )
+      return false
+    }
+    const content = fs.readFileSync(entryFilePath, 'utf-8')
     const [imports, exports] = parse(content)
     if (!exports.length && !/export\s+\*\s+from/.test(content)) {
       if (!pkg.module) {
@@ -202,7 +207,11 @@ export async function optimizeDeps(
   try {
     // Non qualified deps are marked as externals, since they will be preserved
     // and resolved from their original node_modules locations.
-    const preservedDeps = deps.filter((id) => !qualifiedDeps.includes(id))
+    const preservedDeps = deps
+      .filter((id) => !qualifiedDeps.includes(id))
+      // make sure aliased deps are external
+      // https://github.com/vitejs/vite-plugin-react/issues/4
+      .map((id) => resolver.alias(id) || id)
 
     const input = qualifiedDeps.reduce((entries, name) => {
       entries[name] = name
@@ -210,16 +219,11 @@ export async function optimizeDeps(
     }, {} as Record<string, string>)
 
     const rollup = require('rollup') as typeof Rollup
-    const warningIgnoreList = [`CIRCULAR_DEPENDENCY`, `THIS_IS_UNDEFINED`]
     const bundle = await rollup.rollup({
       input,
       external: preservedDeps,
       treeshake: { moduleSideEffects: 'no-external' },
-      onwarn(warning, warn) {
-        if (!warningIgnoreList.includes(warning.code!)) {
-          warn(warning)
-        }
-      },
+      onwarn: onRollupWarning(spinner),
       ...config.rollupInputOptions,
       plugins: [
         ...(await createBaseRollupPlugins(root, resolver, config)),
@@ -231,6 +235,7 @@ export async function optimizeDeps(
       ...config.rollupOutputOptions,
       format: 'es',
       exports: 'named',
+      entryFileNames: '[name]',
       chunkFileNames: 'common/[name]-[hash].js'
     })
 

@@ -1,3 +1,240 @@
+## [0.17.2](https://github.com/vuejs/vite/compare/v0.17.1...v0.17.2) (2020-05-28)
+
+
+### Bug Fixes
+
+* compat for package entries without extension ([6269b7f](https://github.com/vuejs/vite/commit/6269b7f499c96bbe47fc1d8bce7fa77d115e1da6)), closes [#284](https://github.com/vuejs/vite/issues/284)
+* import.meta.hot should be injected before first `if (import.meta.hot)` ([#285](https://github.com/vuejs/vite/issues/285)) ([9ac63b1](https://github.com/vuejs/vite/commit/9ac63b1320ca929010a9cfd78e3c1a7797bd3a80))
+
+
+
+## [0.17.1](https://github.com/vuejs/vite/compare/v0.17.0...v0.17.1) (2020-05-27)
+
+
+### Bug Fixes
+
+* **hmr:** avoid fetching stale modules on nested hmr updates ([0554f06](https://github.com/vuejs/vite/commit/0554f063f6392fa49da0478fef68c80f10c391fc))
+* fix export default rewrite when at beginning of file ([3045112](https://github.com/vuejs/vite/commit/3045112780a8eeb5b8f455b82939cb00da1eef7d))
+* fix import chain walking ([9a44248](https://github.com/vuejs/vite/commit/9a4424822a8d3b3583504b827e1b7089b4319a30))
+* lazy require @vue/compiler-dom so it respects NODE_ENV ([e2594df](https://github.com/vuejs/vite/commit/e2594dffe42776cf8c53725d79525fb0b8b08d68))
+* remove query from resolved src import ([0330b2a](https://github.com/vuejs/vite/commit/0330b2a1f56ea8fa443207c524d817d7de772b56))
+* resolve full extension for SFC src imports ([ae6b49d](https://github.com/vuejs/vite/commit/ae6b49d5bd71a18f917d3a5e57ec3c4b9351da59))
+
+
+
+# [0.17.0](https://github.com/vuejs/vite/compare/v0.16.12...v0.17.0) (2020-05-26)
+
+
+### Bug Fixes
+
+* await rollup resolve result ([#267](https://github.com/vuejs/vite/issues/267)) ([d71a06d](https://github.com/vuejs/vite/commit/d71a06da04954282896e53e16692590101b82c2e))
+* css cache check ([#262](https://github.com/vuejs/vite/issues/262)) ([5435737](https://github.com/vuejs/vite/commit/5435737d126a2d08e7e950dbf4952fc903574d19))
+* default mode for build API usage ([86d2143](https://github.com/vuejs/vite/commit/86d2143e31cba594377da43116c161a87d2d1874))
+* dotenv debug option ([#263](https://github.com/vuejs/vite/issues/263)) ([ca1b551](https://github.com/vuejs/vite/commit/ca1b551c541ed3364374652b9b55e9f0e78b0c3c))
+* fix type dependencies ([e86da9e](https://github.com/vuejs/vite/commit/e86da9e6b56aeaf985ecf590fd775582952279b0))
+* only append import query if has no existing query ([df526b1](https://github.com/vuejs/vite/commit/df526b127e63ff2f52458ea796f9c813880a1a65))
+* ora swallow rollup warning ([#269](https://github.com/vuejs/vite/issues/269)) ([610a004](https://github.com/vuejs/vite/commit/610a00441f8c0faa2e048a0910cf04f9f3810eef))
+* resolve vuePath in all cases ([e67b698](https://github.com/vuejs/vite/commit/e67b698a9ba18a99cb64f52df61fae176382f9ff)), closes [#270](https://github.com/vuejs/vite/issues/270)
+* respect user configured css modules options for rollup-plugin-vue ([0ce1eef](https://github.com/vuejs/vite/commit/0ce1eef7bd77eb8468c8b9e6878c2a78167efc4f))
+* unset service when stopping esbuild service ([dd0205f](https://github.com/vuejs/vite/commit/dd0205f321c57ad0b59813181591dafe1d8d3f90))
+* updateType may contains extra & ([#260](https://github.com/vuejs/vite/issues/260)) ([301d7a3](https://github.com/vuejs/vite/commit/301d7a3b151a8fdefd09db0d742c7b6d0ce206db))
+* use more robust export default replacement for SFC scripts ([2e81e64](https://github.com/vuejs/vite/commit/2e81e64929d9c2909ff5882b26933ea54a353aab)), closes [#271](https://github.com/vuejs/vite/issues/271)
+
+
+### Features
+
+* expose process.env.BASE_URL ([9503762](https://github.com/vuejs/vite/commit/9503762e103f304228ceb7d572b17c24ed008501))
+* support referencing public dir files from root ([319b37b](https://github.com/vuejs/vite/commit/319b37bbf4cef4804b56061ab5354d361c90dacb))
+* **hmr:** re-design HMR API ([a68bfc3](https://github.com/vuejs/vite/commit/a68bfc307dd636d5e1b5d42d6df248da1beea2ff))
+
+
+### Performance Improvements
+
+* revert special handling for vue hmr ([43ccaf7](https://github.com/vuejs/vite/commit/43ccaf77e89ebf219c15aaf12b06a4632beb3968))
+
+
+### BREAKING CHANGES
+
+* `__BASE__` special global has been removed. Use
+`process.env.BASE_URL` instead.
+* **hmr:** HRM API has been re-designed.
+
+  - All HMR APIs are now exposed on `import.meta.hot` and HMR API
+    calls should be nested inside `if (import.meta.hot) {}` conditional
+    checks.
+
+  - `import.meta.hot.accept()` is now only used for self-accepting updates.
+
+  - `import.meta.hot.acceptDeps()` is now used for accepting dependency
+    updates without re-instantiating acceptor.
+
+  - `import.meta.hot.data` is an object that is persisted across hot
+    updates of a module.
+
+  - `import.meta.hot.dispose()` callback now receives the persisted data
+    object.
+
+  - `import.meta.hot.decline()` can be used to decline updates and if
+    the module is affected in an HMR update chain and force full page
+    reload.
+
+  - `import.meta.hot.invalidate()` can be used inside an acceptance
+    callback to conditionally reject the update and force full page
+    reload.
+
+  See `hmr.d.ts` for full API definitions.
+
+
+
+## [0.16.12](https://github.com/vuejs/vite/compare/v0.16.11...v0.16.12) (2020-05-25)
+
+
+### Bug Fixes
+
+* fix rewrite extension appending for out of root files ([84fcfb6](https://github.com/vuejs/vite/commit/84fcfb66ecd9822ebb9dd56505332acce20da568))
+* use upward search for env files ([4fceaea](https://github.com/vuejs/vite/commit/4fceaea1b60ba71f954796dfc601e91300344d3f))
+
+
+### Features
+
+* support webp as static assets ([5589fa3](https://github.com/vuejs/vite/commit/5589fa3ea51f5442083eb4a31844e23386c89af4))
+
+
+
+## [0.16.11](https://github.com/vuejs/vite/compare/v0.16.10...v0.16.11) (2020-05-25)
+
+
+### Bug Fixes
+
+* fix history fallback when serving non cwd root (fix [#251](https://github.com/vuejs/vite/issues/251)) ([c239067](https://github.com/vuejs/vite/commit/c239067969677bc09ad809baf02495072a38b2ff))
+* fix plain css reference via link (fix [#252](https://github.com/vuejs/vite/issues/252)) ([146a49d](https://github.com/vuejs/vite/commit/146a49d78bd8225f846db8baa4adfa604d4cbf4a))
+* fix unused css filter check on windows ([3486d21](https://github.com/vuejs/vite/commit/3486d2117faac0d83bc093f0c8c21b783b8f9f2d))
+* more graceful handling for packages with no main field ([8816d3b](https://github.com/vuejs/vite/commit/8816d3bca6aef8df11f70f934031178accde5163)), closes [#247](https://github.com/vuejs/vite/issues/247)
+* skip hmr for unused css ([#253](https://github.com/vuejs/vite/issues/253)) ([8f7ee38](https://github.com/vuejs/vite/commit/8f7ee38965327cf15dbb4f2d6f3db6e4b642b635))
+* **build:** should ignore assets hash and query ([#256](https://github.com/vuejs/vite/issues/256)) ([528aad6](https://github.com/vuejs/vite/commit/528aad6b66c407e70bab2012d24a5ca0df30edd5))
+
+
+### Features
+
+* support specify env mode ([#235](https://github.com/vuejs/vite/issues/235)) ([db8b6b2](https://github.com/vuejs/vite/commit/db8b6b23d6e230505b48890cc95e0d8642e98804))
+
+
+
+## [0.16.10](https://github.com/vuejs/vite/compare/v0.16.9...v0.16.10) (2020-05-24)
+
+
+### Bug Fixes
+
+* __DEV__ replace should also apply to vite modules ([7c4b64c](https://github.com/vuejs/vite/commit/7c4b64c47ae5271fe262796e1459ff02baf132e2))
+* fix build resolve for vue jsx shim ([1f4518b](https://github.com/vuejs/vite/commit/1f4518b69b6d6d4afdb485570ed795fe4f557a77))
+
+
+
+## [0.16.9](https://github.com/vuejs/vite/compare/v0.16.8...v0.16.9) (2020-05-23)
+
+
+### Bug Fixes
+
+* public dir should be copied to dist root ([bf2b2a9](https://github.com/vuejs/vite/commit/bf2b2a9c7d66b001260e60d825ae72e8c3e0c301))
+* quote resolved urls in rendered html ([fd68ecf](https://github.com/vuejs/vite/commit/fd68ecfa5c5e74a1a463ed5c91b9fecba356f846))
+
+
+
+## [0.16.8](https://github.com/vuejs/vite/compare/v0.16.7...v0.16.8) (2020-05-23)
+
+
+### Bug Fixes
+
+* defaultRequestToFile should consider optimized modules ([#239](https://github.com/vuejs/vite/issues/239)) ([b5ddcdc](https://github.com/vuejs/vite/commit/b5ddcdcc65f62bf3fd50e487dc2d9bfa61624539))
+* properly resolve file extensions ([aaf61f4](https://github.com/vuejs/vite/commit/aaf61f4d0d6843d0b34c9c75c4dec8a95e95b9d1)), closes [#237](https://github.com/vuejs/vite/issues/237)
+
+
+
+## [0.16.7](https://github.com/vuejs/vite/compare/v0.16.6...v0.16.7) (2020-05-22)
+
+
+### Bug Fixes
+
+* defaultRequestToFile should handle uncached node_modules request ([#230](https://github.com/vuejs/vite/issues/230)) ([7a3e822](https://github.com/vuejs/vite/commit/7a3e822597b94f8440e7436e3cc54a2764fff4eb)), closes [#228](https://github.com/vuejs/vite/issues/228)
+* disable cssCodeSplit in ssr build ([457f1f2](https://github.com/vuejs/vite/commit/457f1f2aca32f968f4ffe822633a2b4c49456fd4))
+* do not attempt to rewrite css urls that are hash fragments ([029de6b](https://github.com/vuejs/vite/commit/029de6b30bfc307d4b02f28703cd8d73a706b1cd))
+* ensure env vairable replacements are efficient for bundle size ([1be6121](https://github.com/vuejs/vite/commit/1be61219d1e253d6edec812ff7828b69d775c093))
+* ensure rewrite middlewares have highest priority ([e741628](https://github.com/vuejs/vite/commit/e74162857ad33788f6fa02a4dca863aa7354fc76))
+* fix entry resolving for packages with explicit exports ([c493629](https://github.com/vuejs/vite/commit/c4936290380891353de0581e432389310147a8e0)), closes [#227](https://github.com/vuejs/vite/issues/227)
+* only apply vite-specific global replacements to non-dep code ([b96ed68](https://github.com/vuejs/vite/commit/b96ed689970a1c0ab87f21c7cdf7d72a12c493c2))
+
+
+### Features
+
+* support built-in css preprocess ([#220](https://github.com/vuejs/vite/issues/220)) ([bef67f5](https://github.com/vuejs/vite/commit/bef67f50a56d190a0cd5fd2bcea94ad2d4f80185))
+* support loading customize env variables from .env file ([#223](https://github.com/vuejs/vite/issues/223)) ([89fe0a9](https://github.com/vuejs/vite/commit/89fe0a9c912cb944e87556ca3cc344c6fac0fc0d)), closes [#213](https://github.com/vuejs/vite/issues/213)
+
+
+
+## [0.16.6](https://github.com/vuejs/vite/compare/v0.16.4...v0.16.6) (2020-05-21)
+
+
+### Bug Fixes
+
+* make sure aliased deps are externaled correctly ([#218](https://github.com/vuejs/vite/issues/218)) ([a1f5488](https://github.com/vuejs/vite/commit/a1f54889a95a24f89804b0fbdfc876cde5615c98))
+* redirect url in case index.html is not present ([8a9710b](https://github.com/vuejs/vite/commit/8a9710b1a90cadfa69889cf00c224ea41ca13a9f))
+* respect cssCodeSplit option ([4a0b6cc](https://github.com/vuejs/vite/commit/4a0b6cc573840f3f74ac4f1b59bc957f1c626a92))
+
+
+
+## [0.16.5](https://github.com/vuejs/vite/compare/v0.16.4...v0.16.5) (2020-05-21)
+
+
+### Bug Fixes
+
+* redirect url in case index.html is not present ([df733d9](https://github.com/vuejs/vite/commit/df733d9cd93ad1d1d01c11b8b7a3a9659a7b9cbf))
+* respect cssCodeSplit option ([3751551](https://github.com/vuejs/vite/commit/375155164ec68c78f07fc57d34cdc477249dc3a2))
+
+
+
+## [0.16.4](https://github.com/vuejs/vite/compare/v0.16.3...v0.16.4) (2020-05-20)
+
+
+### Features
+
+* **dev:** support dev https server ([#208](https://github.com/vuejs/vite/issues/208)) ([8b95954](https://github.com/vuejs/vite/commit/8b95954c87a04fae90be0a3e769f385a87182c8e))
+* css code splitting in async chunks ([09879b3](https://github.com/vuejs/vite/commit/09879b30f321ca70789fd8afc3cd95bf68947698)), closes [#190](https://github.com/vuejs/vite/issues/190)
+
+
+
+## [0.16.3](https://github.com/vuejs/vite/compare/v0.16.1...v0.16.3) (2020-05-20)
+
+
+### Bug Fixes
+
+* adjust history fallback ([ba614ef](https://github.com/vuejs/vite/commit/ba614ef59b576c2ea34baa580adb59d6d16625e8)), closes [#193](https://github.com/vuejs/vite/issues/193)
+* fix cross import between optimized modules and avoid duplication ([eedc985](https://github.com/vuejs/vite/commit/eedc985b1f7108373a762b9d1fc94842fd40c17f)), closes [#210](https://github.com/vuejs/vite/issues/210)
+* fix external url check for protocol-less urls ([91f829d](https://github.com/vuejs/vite/commit/91f829dc1bfb5c1ed8411751b31f17c2322ed0a7))
+* html rewrite cache should be based on content ([3752874](https://github.com/vuejs/vite/commit/3752874481ceef6188d5783d21e1fbc5e150a932))
+* only warn deep imports on js src types ([ada8886](https://github.com/vuejs/vite/commit/ada8886e36578c7f43b7cd12bacd65e5a7c4c6e4))
+
+
+### Features
+
+* allow user to configure known named exports ([#206](https://github.com/vuejs/vite/issues/206)) ([25852fa](https://github.com/vuejs/vite/commit/25852fa8f7087ed50764a4a955a9397b930c1f87))
+
+
+
+## [0.16.2](https://github.com/vuejs/vite/compare/v0.16.1...v0.16.2) (2020-05-20)
+
+
+### Bug Fixes
+
+* adjust history fallback ([ba614ef](https://github.com/vuejs/vite/commit/ba614ef59b576c2ea34baa580adb59d6d16625e8)), closes [#193](https://github.com/vuejs/vite/issues/193)
+* html rewrite cache should be based on content ([3752874](https://github.com/vuejs/vite/commit/3752874481ceef6188d5783d21e1fbc5e150a932))
+
+
+### Features
+
+* allow user to configure known named exports ([#206](https://github.com/vuejs/vite/issues/206)) ([25852fa](https://github.com/vuejs/vite/commit/25852fa8f7087ed50764a4a955a9397b930c1f87))
+
+
+
 ## [0.16.1](https://github.com/vuejs/vite/compare/v0.16.0...v0.16.1) (2020-05-20)
 
 

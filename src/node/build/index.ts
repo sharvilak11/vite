@@ -3,7 +3,13 @@ import fs from 'fs-extra'
 import chalk from 'chalk'
 import { Ora } from 'ora'
 import { resolveFrom } from '../utils'
-import { rollup as Rollup, RollupOutput, ExternalOption, Plugin } from 'rollup'
+import {
+  rollup as Rollup,
+  RollupOutput,
+  ExternalOption,
+  Plugin,
+  InputOptions
+} from 'rollup'
 import { createResolver, supportedExts, InternalResolver } from '../resolver'
 import { createBuildResolvePlugin } from './buildPluginResolve'
 import { createBuildHtmlPlugin } from './buildPluginHtml'
@@ -35,6 +41,24 @@ const writeColors = {
   [WriteType.ASSET]: chalk.green,
   [WriteType.HTML]: chalk.blue,
   [WriteType.SOURCE_MAP]: chalk.gray
+}
+
+const warningIgnoreList = [`CIRCULAR_DEPENDENCY`, `THIS_IS_UNDEFINED`]
+
+export const onRollupWarning: (
+  spinner: Ora | undefined
+) => InputOptions['onwarn'] = (spinner) => (warning, warn) => {
+  if (!warningIgnoreList.includes(warning.code!)) {
+    // ora would swallow the console.warn if we let it keep running
+    // https://github.com/sindresorhus/ora/issues/90
+    if (spinner) {
+      spinner.stop()
+    }
+    warn(warning)
+    if (spinner) {
+      spinner.start()
+    }
+  }
 }
 
 /**
@@ -102,7 +126,9 @@ export async function createBaseRollupPlugins(
       compilerOptions: options.vueCompilerOptions,
       cssModulesOptions: {
         generateScopedName: (local: string, filename: string) =>
-          `${local}_${hash_sum(filename)}`
+          `${local}_${hash_sum(filename)}`,
+        ...(options.rollupPluginVueOptions &&
+          options.rollupPluginVueOptions.cssModulesOptions)
       }
     }),
     require('@rollup/plugin-json')({
@@ -129,7 +155,7 @@ export async function createBaseRollupPlugins(
  * Bundles the app for production.
  * Returns a Promise containing the build result.
  */
-export async function build(options: BuildConfig = {}): Promise<BuildResult> {
+export async function build(options: BuildConfig): Promise<BuildResult> {
   if (options.ssr) {
     return ssrBuild({
       ...options,
@@ -137,18 +163,14 @@ export async function build(options: BuildConfig = {}): Promise<BuildResult> {
     })
   }
 
-  const isTest = process.env.NODE_ENV === 'test'
-  process.env.NODE_ENV = 'production'
-  const start = Date.now()
-
   const {
     root = process.cwd(),
     base = '/',
     outDir = path.resolve(root, 'dist'),
     assetsDir = '_assets',
     assetsInlineLimit = 4096,
+    cssCodeSplit = true,
     alias = {},
-    transforms = [],
     resolvers = [],
     rollupInputOptions = {},
     rollupOutputOptions = {},
@@ -158,8 +180,14 @@ export async function build(options: BuildConfig = {}): Promise<BuildResult> {
     minify = true,
     silent = false,
     sourcemap = false,
-    shouldPreload = null
+    shouldPreload = null,
+    env = {},
+    mode = 'production'
   } = options
+
+  const isTest = process.env.NODE_ENV === 'test'
+  process.env.NODE_ENV = mode
+  const start = Date.now()
 
   let spinner: Ora | undefined
   const msg = 'Building for production...'
@@ -189,6 +217,12 @@ export async function build(options: BuildConfig = {}): Promise<BuildResult> {
 
   const basePlugins = await createBaseRollupPlugins(root, resolver, options)
 
+  env.NODE_ENV = mode!
+  const envReplacements = Object.keys(env).reduce((replacements, key) => {
+    replacements[`process.env.${key}`] = JSON.stringify(env[key])
+    return replacements
+  }, {} as Record<string, string>)
+
   // lazy require rollup so that we don't load it when only using the dev server
   // importing it just for the types
   const rollup = require('rollup').rollup as typeof Rollup
@@ -196,11 +230,7 @@ export async function build(options: BuildConfig = {}): Promise<BuildResult> {
     input: path.resolve(root, 'index.html'),
     preserveEntrySignatures: false,
     treeshake: { moduleSideEffects: 'no-external' },
-    onwarn(warning, warn) {
-      if (warning.code !== 'CIRCULAR_DEPENDENCY') {
-        warn(warning)
-      }
-    },
+    onwarn: onRollupWarning(spinner),
     ...rollupInputOptions,
     plugins: [
       ...basePlugins,
@@ -211,11 +241,23 @@ export async function build(options: BuildConfig = {}): Promise<BuildResult> {
       // - which makes it impossible to exclude Vue templates from it since
       // Vue templates are compiled into js and included in chunks.
       createReplacePlugin(
+        (id) => /\.(j|t)sx?$/.test(id),
         {
-          'process.env.NODE_ENV': '"production"',
+          ...envReplacements,
+          'process.env.BASE_URL': JSON.stringify(publicBasePath),
           'process.env.': `({}).`,
-          __DEV__: 'false',
-          __BASE__: JSON.stringify(publicBasePath)
+          'import.meta.hot': `false`
+        },
+        sourcemap
+      ),
+      // for vite spcific replacements, make sure to only apply them to
+      // non-dependency code to avoid collision (e.g. #224 antd has __DEV__)
+      createReplacePlugin(
+        (id) =>
+          id.startsWith('/vite') ||
+          (!id.includes('node_modules') && /\.(j|t)sx?$/.test(id)),
+        {
+          __DEV__: `false`
         },
         sourcemap
       ),
@@ -224,9 +266,9 @@ export async function build(options: BuildConfig = {}): Promise<BuildResult> {
         root,
         publicBasePath,
         assetsDir,
-        !!minify,
+        minify,
         assetsInlineLimit,
-        transforms
+        cssCodeSplit
       ),
       // vite:asset
       createBuildAssetPlugin(
@@ -249,7 +291,7 @@ export async function build(options: BuildConfig = {}): Promise<BuildResult> {
     format: 'es',
     sourcemap,
     entryFileNames: `[name].[hash].js`,
-    chunkFileNames: `common.[hash].js`,
+    chunkFileNames: `[name].[hash].js`,
     ...rollupOutputOptions
   })
 
@@ -324,7 +366,9 @@ export async function build(options: BuildConfig = {}): Promise<BuildResult> {
     if (emitAssets) {
       const publicDir = path.resolve(root, 'public')
       if (fs.existsSync(publicDir)) {
-        await fs.copy(publicDir, path.resolve(outDir, 'public'))
+        for (const file of await fs.readdir(publicDir)) {
+          await fs.copy(path.join(publicDir, file), path.resolve(outDir, file))
+        }
       }
     }
   }
@@ -350,9 +394,7 @@ export async function build(options: BuildConfig = {}): Promise<BuildResult> {
  * - Imports to dependencies are compiled into require() calls
  * - Templates are compiled with SSR specific optimizations.
  */
-export async function ssrBuild(
-  options: BuildConfig = {}
-): Promise<BuildResult> {
+export async function ssrBuild(options: BuildConfig): Promise<BuildResult> {
   const {
     rollupInputOptions,
     rollupOutputOptions,
@@ -376,10 +418,12 @@ export async function ssrBuild(
     rollupOutputOptions: {
       ...rollupOutputOptions,
       format: 'cjs',
-      exports: 'named'
+      exports: 'named',
+      entryFileNames: '[name].js'
     },
     emitIndex: false,
     emitAssets: false,
+    cssCodeSplit: false,
     minify: false
   })
 }
